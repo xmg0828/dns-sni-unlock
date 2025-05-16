@@ -1,7 +1,7 @@
 #!/bin/bash
 # 流媒体解锁脚本 - 基于DNS+SNIProxy
 # 支持Netflix、Disney+、TikTok、OpenAI、Claude、Gemini等服务解锁
-# 版本: 2.1
+# 版本: 2.2
 
 # 颜色定义
 RED="\033[31m"; GREEN="\033[32m"; YELLOW="\033[33m"; BLUE="\033[36m"; PLAIN="\033[0m"
@@ -40,38 +40,37 @@ install_packages() {
     yum update -y
     yum install -y epel-release
     yum install -y bind-utils dnsmasq curl wget git make gcc openssl-devel libevent-devel iptables iptables-services
-    # 安装SNIProxy
-    if ! command -v sniproxy &> /dev/null; then
-      cd /tmp
-      git clone https://github.com/dlundquist/sniproxy.git
-      cd sniproxy
-      ./autogen.sh
-      ./configure
-      make
-      make install
-      mkdir -p /etc/sniproxy
-      cd ..
-      rm -rf sniproxy
-    fi
-    systemctl enable iptables
   elif [ "${RELEASE}" == "debian" ] || [ "${RELEASE}" == "ubuntu" ]; then
     apt-get update -y
     apt-get install -y dnsutils dnsmasq curl wget git build-essential libudns-dev libev-dev libpcre3-dev iptables iptables-persistent
-    # 安装SNIProxy
-    if ! command -v sniproxy &> /dev/null; then
-      cd /tmp
-      git clone https://github.com/dlundquist/sniproxy.git
-      cd sniproxy
-      ./autogen.sh
-      ./configure
-      make
-      make install
-      mkdir -p /etc/sniproxy
-      cd ..
-      rm -rf sniproxy
-    fi
   fi
   echo -e "${GREEN}必要软件安装完成!${PLAIN}"
+}
+
+# 安装SNIProxy
+install_sniproxy() {
+  echo -e "${BLUE}安装SNIProxy...${PLAIN}"
+  
+  if [ "${RELEASE}" == "debian" ] || [ "${RELEASE}" == "ubuntu" ]; then
+    apt-get update -y
+    apt-get install -y sniproxy
+  elif [ "${RELEASE}" == "centos" ]; then
+    yum install -y epel-release
+    yum install -y sniproxy
+  else
+    # 从源码安装
+    cd /tmp
+    rm -rf sniproxy
+    git clone https://github.com/dlundquist/sniproxy.git
+    cd sniproxy
+    ./autogen.sh
+    ./configure
+    make
+    make install
+    mkdir -p /etc/sniproxy
+  fi
+  
+  echo -e "${GREEN}SNIProxy安装完成!${PLAIN}"
 }
 
 # 配置dnsmasq
@@ -104,26 +103,23 @@ config_sniproxy() {
   echo -e "${BLUE}配置SNIProxy...${PLAIN}"
   cat > "$SNIPROXY_CONFIG" << EOF
 # SNIProxy配置
-user daemon
-pidfile /var/run/sniproxy.pid
+user nobody
 
 listener 80 {
-    proto http
+    protocol http
 }
 
 listener 443 {
-    proto tls
+    protocol tls
 }
 
 table {
-    # 默认规则
-    .* *:443
+    .* *
 }
 
 resolver {
     nameserver 8.8.8.8
-    nameserver 8.8.4.4
-    mode ipv4_only
+    nameserver 1.1.1.1
 }
 EOF
   echo -e "${GREEN}SNIProxy配置完成!${PLAIN}"
@@ -138,9 +134,8 @@ Description=SNI Proxy
 After=network.target
 
 [Service]
-Type=forking
-PIDFile=/var/run/sniproxy.pid
-ExecStart=/usr/local/sbin/sniproxy -c $SNIPROXY_CONFIG
+Type=simple
+ExecStart=/usr/sbin/sniproxy -c $SNIPROXY_CONFIG -f
 ExecReload=/bin/kill -HUP \$MAINPID
 ExecStop=/bin/kill -TERM \$MAINPID
 
@@ -149,6 +144,55 @@ WantedBy=multi-user.target
 EOF
   systemctl daemon-reload
   echo -e "${GREEN}服务文件创建完成!${PLAIN}"
+}
+
+# 修复SNIProxy
+fix_sniproxy() {
+  echo -e "${BLUE}尝试修复SNIProxy...${PLAIN}"
+  
+  # 停止服务
+  systemctl stop sniproxy
+  
+  # 重新配置
+  config_sniproxy
+  
+  # 重新创建服务文件
+  cat > /etc/systemd/system/sniproxy.service << EOF
+[Unit]
+Description=SNI Proxy
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/usr/sbin/sniproxy -c $SNIPROXY_CONFIG -f
+ExecReload=/bin/kill -HUP \$MAINPID
+ExecStop=/bin/kill -TERM \$MAINPID
+
+[Install]
+WantedBy=multi-user.target
+EOF
+  
+  # 重新加载systemd配置
+  systemctl daemon-reload
+  
+  # 启动服务
+  systemctl restart sniproxy
+  systemctl enable sniproxy
+  
+  # 检查状态
+  if systemctl is-active sniproxy &> /dev/null; then
+    echo -e "${GREEN}SNIProxy已修复并成功启动!${PLAIN}"
+  else
+    echo -e "${RED}SNIProxy启动失败，尝试重新安装...${PLAIN}"
+    install_sniproxy
+    config_sniproxy
+    systemctl restart sniproxy
+    if systemctl is-active sniproxy &> /dev/null; then
+      echo -e "${GREEN}SNIProxy已重装并成功启动!${PLAIN}"
+    else
+      echo -e "${RED}SNIProxy仍然无法启动，请检查日志: journalctl -u sniproxy${PLAIN}"
+    fi
+  fi
 }
 
 # 初始化服务配置文件
@@ -533,6 +577,7 @@ install_service() {
   check_root
   check_system
   install_packages
+  install_sniproxy
   config_dnsmasq
   config_sniproxy
   create_service_files
@@ -541,7 +586,39 @@ install_service() {
   init_firewall_whitelist
   apply_firewall_rules
   start_services
+  
+  # 检查服务是否成功启动，如失败则尝试修复
+  if ! systemctl is-active sniproxy &> /dev/null; then
+    echo -e "${YELLOW}SNIProxy启动失败，尝试修复...${PLAIN}"
+    fix_sniproxy
+  fi
+  
   echo -e "${GREEN}解锁服务安装完成!${PLAIN}"
+  check_status
+}
+
+# 修复服务
+repair_service() {
+  echo -e "${BLUE}开始修复服务...${PLAIN}"
+  
+  # 修复dnsmasq
+  echo -e "${YELLOW}修复dnsmasq...${PLAIN}"
+  systemctl stop dnsmasq
+  config_dnsmasq
+  systemctl restart dnsmasq
+  systemctl enable dnsmasq
+  
+  # 修复SNIProxy
+  echo -e "${YELLOW}修复SNIProxy...${PLAIN}"
+  fix_sniproxy
+  
+  # 重新应用服务配置
+  apply_service_config
+  
+  # 重新应用防火墙规则
+  apply_firewall_rules
+  
+  echo -e "${GREEN}服务修复完成!${PLAIN}"
   check_status
 }
 
@@ -550,6 +627,7 @@ show_menu() {
   clear
   echo -e "流媒体解锁脚本 - 基于DNS+SNIProxy"
   echo -e "支持Netflix、Disney+、TikTok、OpenAI、Claude、Gemini等服务解锁"
+  echo -e "版本: 2.2 (增强版)"
   echo -e "----------------------------------------"
   echo -e "1. 安装解锁服务"
   echo -e "2. 添加自定义服务"
@@ -559,11 +637,12 @@ show_menu() {
   echo -e "6. 重启服务"
   echo -e "7. 检查服务状态"
   echo -e "8. 防火墙管理"
-  echo -e "9. 重置配置"
-  echo -e "10. 卸载服务"
+  echo -e "9. 修复服务(SNIProxy问题)"
+  echo -e "10. 重置配置"
+  echo -e "11. 卸载服务"
   echo -e "0. 退出"
   echo -e "----------------------------------------"
-  read -p "请输入选项 [0-10]: " option
+  read -p "请输入选项 [0-11]: " option
   
   case $option in
     1) install_service ;;
@@ -574,8 +653,9 @@ show_menu() {
     6) restart_services ;;
     7) check_status ;;
     8) manage_firewall ;;
-    9) reset_config ;;
-    10) uninstall_service ;;
+    9) repair_service ;;
+    10) reset_config ;;
+    11) uninstall_service ;;
     0) exit 0 ;;
     *) echo -e "${RED}无效选项!${PLAIN}" ;;
   esac
