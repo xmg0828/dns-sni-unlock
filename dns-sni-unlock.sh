@@ -1,12 +1,9 @@
 #!/bin/bash
 # 流媒体解锁脚本 - 基于DNS+SNIProxy
-# 支持Netflix、Disney+、TikTok、OpenAI、Claude、Gemini等服务解锁
-# 版本: 2.2
+# 支持Netflix、Disney+、TikTok、YouTube、OpenAI、Claude、Gemini、xAI等服务解锁
+# 版本: 2.3
 
-# 颜色定义
 RED="\033[31m"; GREEN="\033[32m"; YELLOW="\033[33m"; BLUE="\033[36m"; PLAIN="\033[0m"
-
-# 配置文件路径
 CONFIG_DIR="/etc/dnsmasq.d"
 DNSMASQ_CONFIG="/etc/dnsmasq.conf"
 SNIPROXY_CONFIG="/etc/sniproxy.conf"
@@ -15,12 +12,10 @@ WHITELIST_FILE="/root/firewall_whitelist_ips.txt"
 DEFAULT_IP="127.0.0.1"
 PROTECTED_PORTS=("53" "80" "443")
 
-# 检查root权限
 check_root() {
   [ "$(id -u)" != "0" ] && echo -e "${RED}错误: 请使用root权限运行此脚本!${PLAIN}" && exit 1
 }
 
-# 检查系统
 check_system() {
   if [ -f /etc/redhat-release ]; then RELEASE="centos"
   elif grep -Eqi "debian" /etc/issue; then RELEASE="debian"
@@ -33,7 +28,6 @@ check_system() {
   fi
 }
 
-# 安装必要软件
 install_packages() {
   echo -e "${BLUE}开始安装必要软件...${PLAIN}"
   if [ "${RELEASE}" == "centos" ]; then
@@ -47,10 +41,8 @@ install_packages() {
   echo -e "${GREEN}必要软件安装完成!${PLAIN}"
 }
 
-# 安装SNIProxy
 install_sniproxy() {
   echo -e "${BLUE}安装SNIProxy...${PLAIN}"
-  
   if [ "${RELEASE}" == "debian" ] || [ "${RELEASE}" == "ubuntu" ]; then
     apt-get update -y
     apt-get install -y sniproxy
@@ -58,7 +50,6 @@ install_sniproxy() {
     yum install -y epel-release
     yum install -y sniproxy
   else
-    # 从源码安装
     cd /tmp
     rm -rf sniproxy
     git clone https://github.com/dlundquist/sniproxy.git
@@ -69,54 +60,37 @@ install_sniproxy() {
     make install
     mkdir -p /etc/sniproxy
   fi
-  
   echo -e "${GREEN}SNIProxy安装完成!${PLAIN}"
 }
 
-# 配置dnsmasq
 config_dnsmasq() {
   echo -e "${BLUE}配置dnsmasq...${PLAIN}"
   [ -f "$DNSMASQ_CONFIG" ] && cp "$DNSMASQ_CONFIG" "$DNSMASQ_CONFIG.bak.$(date +%Y%m%d%H%M%S)"
   mkdir -p $CONFIG_DIR
   cat > "$DNSMASQ_CONFIG" << EOF
-# DNS服务器设置
 server=8.8.8.8
 server=8.8.4.4
-
-# 监听地址
 listen-address=127.0.0.1
-
-# 缓存设置
 cache-size=1024
-
-# 不使用hosts文件
 no-hosts
-
-# 解析域名配置文件
 conf-dir=/etc/dnsmasq.d/,*.conf
 EOF
   echo -e "${GREEN}dnsmasq配置完成!${PLAIN}"
 }
 
-# 配置SNIProxy
 config_sniproxy() {
   echo -e "${BLUE}配置SNIProxy...${PLAIN}"
   cat > "$SNIPROXY_CONFIG" << EOF
-# SNIProxy配置
 user nobody
-
 listener 80 {
     protocol http
 }
-
 listener 443 {
     protocol tls
 }
-
 table {
     .* *
 }
-
 resolver {
     nameserver 8.8.8.8
     nameserver 1.1.1.1
@@ -125,20 +99,17 @@ EOF
   echo -e "${GREEN}SNIProxy配置完成!${PLAIN}"
 }
 
-# 创建服务文件
 create_service_files() {
   echo -e "${BLUE}创建服务文件...${PLAIN}"
   cat > /etc/systemd/system/sniproxy.service << EOF
 [Unit]
 Description=SNI Proxy
 After=network.target
-
 [Service]
 Type=simple
 ExecStart=/usr/sbin/sniproxy -c $SNIPROXY_CONFIG -f
 ExecReload=/bin/kill -HUP \$MAINPID
 ExecStop=/bin/kill -TERM \$MAINPID
-
 [Install]
 WantedBy=multi-user.target
 EOF
@@ -146,40 +117,13 @@ EOF
   echo -e "${GREEN}服务文件创建完成!${PLAIN}"
 }
 
-# 修复SNIProxy
 fix_sniproxy() {
   echo -e "${BLUE}尝试修复SNIProxy...${PLAIN}"
-  
-  # 停止服务
   systemctl stop sniproxy
-  
-  # 重新配置
   config_sniproxy
-  
-  # 重新创建服务文件
-  cat > /etc/systemd/system/sniproxy.service << EOF
-[Unit]
-Description=SNI Proxy
-After=network.target
-
-[Service]
-Type=simple
-ExecStart=/usr/sbin/sniproxy -c $SNIPROXY_CONFIG -f
-ExecReload=/bin/kill -HUP \$MAINPID
-ExecStop=/bin/kill -TERM \$MAINPID
-
-[Install]
-WantedBy=multi-user.target
-EOF
-  
-  # 重新加载systemd配置
-  systemctl daemon-reload
-  
-  # 启动服务
+  create_service_files
   systemctl restart sniproxy
   systemctl enable sniproxy
-  
-  # 检查状态
   if systemctl is-active sniproxy &> /dev/null; then
     echo -e "${GREEN}SNIProxy已修复并成功启动!${PLAIN}"
   else
@@ -195,26 +139,23 @@ EOF
   fi
 }
 
-# 初始化服务配置文件
 init_service_config() {
   if [ ! -f "$SERVICE_CONFIG" ]; then
     echo -e "${BLUE}初始化服务配置...${PLAIN}"
     cat > "$SERVICE_CONFIG" << EOF
-# 服务配置文件
-# 格式: 服务名称:解锁IP:域名列表(用空格分隔)
-
-TikTok:${DEFAULT_IP}:tiktok.com tiktokv.com tiktokcdn.com musical.ly
-OpenAI:${DEFAULT_IP}:openai.com chat.openai.com platform.openai.com api.openai.com
-Claude:${DEFAULT_IP}:anthropic.com claude.ai
-Gemini:${DEFAULT_IP}:gemini.google.com generativelanguage.googleapis.com
-Disney:${DEFAULT_IP}:disney.com disneyplus.com dssott.com bamgrid.com disney-plus.net
-Netflix:${DEFAULT_IP}:netflix.com netflix.net nflximg.com nflximg.net nflxvideo.net nflxso.net
+TikTok:${DEFAULT_IP}:tiktok.com tiktok.org bytedance.com tiktokv.com tiktokcdn.com musical.ly lemon8-app.com capcut.com
+OpenAI:${DEFAULT_IP}:openai.com chat.openai.com platform.openai.com api.openai.com auth0.openai.com
+Claude:${DEFAULT_IP}:anthropic.com claude.ai console.anthropic.com
+Gemini:${DEFAULT_IP}:gemini.google.com generativelanguage.googleapis.com bard.google.com ai.google.dev makersuite.google.com
+xAI:${DEFAULT_IP}:x.ai grok.x.ai api.x.ai
+Netflix:${DEFAULT_IP}:netflix.com netflix.net nflxext.com nflximg.net nflxso.net nflxvideo.net netflixdnstest0.com netflixdnstest1.com netflixdnstest2.com netflixdnstest3.com netflixdnstest4.com netflixdnstest5.com
+Disney:${DEFAULT_IP}:disney.com disneyjunior.com disney-plus.net disney-portal.my.onetrust.com disney.demdex.net disney.my.sentry.io disneyplus.bn5x.net disneyplus.com disneyplus.com.ssl.sc.omtrdc.net disneystreaming.com dssott.com bamgrid.com cdn.registerdisney.go.com cws.conviva.com
+YouTube:${DEFAULT_IP}:youtube.com youtu.be googleapis.com gstatic.com ytimg.com googlevideo.com youtube-nocookie.com ggpht.com googleusercontent.com
 EOF
     echo -e "${GREEN}服务配置初始化完成!${PLAIN}"
   fi
 }
 
-# 应用服务配置
 apply_service_config() {
   echo -e "${BLUE}应用服务配置...${PLAIN}"
   rm -f $CONFIG_DIR/*.conf
@@ -230,7 +171,6 @@ apply_service_config() {
   echo -e "${GREEN}服务配置应用完成!${PLAIN}"
 }
 
-# 初始化防火墙白名单
 init_firewall_whitelist() {
   mkdir -p /root
   if [ ! -f "$WHITELIST_FILE" ]; then
@@ -245,7 +185,6 @@ init_firewall_whitelist() {
   fi
 }
 
-# 应用防火墙规则
 apply_firewall_rules() {
   echo -e "${BLUE}正在应用防火墙规则...${PLAIN}"
   iptables -F
@@ -256,19 +195,16 @@ apply_firewall_rules() {
   iptables -A INPUT -p tcp --dport 22 -j ACCEPT
   iptables -A INPUT -m state --state ESTABLISHED,RELATED -j ACCEPT
   iptables -A INPUT -i lo -j ACCEPT
-  
   while IFS= read -r IP; do
     for PORT in "${PROTECTED_PORTS[@]}"; do
       [ "$PORT" = "53" ] && iptables -A INPUT -p udp -s "$IP" --dport 53 -j ACCEPT
       iptables -A INPUT -p tcp -s "$IP" --dport "$PORT" -j ACCEPT
     done
   done < "$WHITELIST_FILE"
-  
   for PORT in "${PROTECTED_PORTS[@]}"; do
     [ "$PORT" = "53" ] && iptables -A INPUT -p udp --dport 53 -j DROP
     iptables -A INPUT -p tcp --dport "$PORT" -j DROP
   done
-  
   if [ "${RELEASE}" == "centos" ]; then
     service iptables save
   elif [ "${RELEASE}" == "debian" ] || [ "${RELEASE}" == "ubuntu" ]; then
@@ -278,7 +214,6 @@ apply_firewall_rules() {
   echo -e "${GREEN}防火墙规则已应用!${PLAIN}"
 }
 
-# 添加IP到防火墙白名单
 add_ip_to_whitelist() {
   read -p "请输入要添加到白名单的IP: " new_ip
   if [ -z "$new_ip" ] || ! [[ $new_ip =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
@@ -294,7 +229,6 @@ add_ip_to_whitelist() {
   apply_firewall_rules
 }
 
-# 移除IP从防火墙白名单
 remove_ip_from_whitelist() {
   echo -e "${BLUE}当前白名单IP:${PLAIN}"
   cat -n "$WHITELIST_FILE"
@@ -318,7 +252,6 @@ remove_ip_from_whitelist() {
   apply_firewall_rules
 }
 
-# 管理防火墙
 manage_firewall() {
   clear
   echo -e "防火墙管理"
@@ -331,7 +264,6 @@ manage_firewall() {
   echo -e "0. 返回主菜单"
   echo -e "----------------------------------------"
   read -p "请输入选项 [0-5]: " option
-  
   case $option in
     1)
       echo -e "${YELLOW}当前白名单IP:${PLAIN}"
@@ -363,7 +295,6 @@ manage_firewall() {
   manage_firewall
 }
 
-# 启动服务
 start_services() {
   echo -e "${BLUE}启动服务...${PLAIN}"
   systemctl restart dnsmasq
@@ -373,7 +304,6 @@ start_services() {
   echo -e "${GREEN}服务已启动!${PLAIN}"
 }
 
-# 重启服务
 restart_services() {
   echo -e "${BLUE}重启服务...${PLAIN}"
   systemctl restart dnsmasq
@@ -381,7 +311,6 @@ restart_services() {
   echo -e "${GREEN}服务已重启!${PLAIN}"
 }
 
-# 检查服务状态
 check_status() {
   echo -e "${BLUE}服务状态:${PLAIN}"
   echo -e "${YELLOW}dnsmasq状态:${PLAIN}"
@@ -398,7 +327,6 @@ check_status() {
   [ -f "$WHITELIST_FILE" ] && cat -n "$WHITELIST_FILE" || echo -e "${RED}白名单文件不存在!${PLAIN}"
 }
 
-# 更改服务IP
 change_service_ip() {
   echo -e "${BLUE}当前服务配置:${PLAIN}"
   local services=()
@@ -409,7 +337,6 @@ change_service_ip() {
     echo -e "$i. ${GREEN}$service${PLAIN} - 当前IP: ${YELLOW}$ip${PLAIN}"
     ((i++))
   done < "$SERVICE_CONFIG"
-  
   read -p "请选择要更改IP的服务 [1-$((i-1))]: " service_num
   if ! [[ "$service_num" =~ ^[0-9]+$ ]] || [ "$service_num" -lt 1 ] || [ "$service_num" -gt $((i-1)) ]; then
     echo -e "${RED}无效选择!${PLAIN}"
@@ -430,7 +357,6 @@ change_service_ip() {
   restart_services
 }
 
-# 添加自定义服务
 add_custom_service() {
   read -p "请输入服务名称: " service_name
   if [ -z "$service_name" ]; then
@@ -458,7 +384,6 @@ add_custom_service() {
   restart_services
 }
 
-# 添加域名到服务
 add_domains_to_service() {
   echo -e "${BLUE}当前服务配置:${PLAIN}"
   local services=()
@@ -469,7 +394,6 @@ add_domains_to_service() {
     echo -e "$i. ${GREEN}$service${PLAIN}"
     ((i++))
   done < "$SERVICE_CONFIG"
-  
   read -p "请选择要添加域名的服务 [1-$((i-1))]: " service_num
   if ! [[ "$service_num" =~ ^[0-9]+$ ]] || [ "$service_num" -lt 1 ] || [ "$service_num" -gt $((i-1)) ]; then
     echo -e "${RED}无效选择!${PLAIN}"
@@ -492,7 +416,6 @@ add_domains_to_service() {
   restart_services
 }
 
-# 移除服务
 remove_service() {
   echo -e "${BLUE}当前服务配置:${PLAIN}"
   local services=()
@@ -503,7 +426,6 @@ remove_service() {
     echo -e "$i. ${GREEN}$service${PLAIN}"
     ((i++))
   done < "$SERVICE_CONFIG"
-  
   read -p "请选择要移除的服务 [1-$((i-1))]: " service_num
   if ! [[ "$service_num" =~ ^[0-9]+$ ]] || [ "$service_num" -lt 1 ] || [ "$service_num" -gt $((i-1)) ]; then
     echo -e "${RED}无效选择!${PLAIN}"
@@ -522,7 +444,6 @@ remove_service() {
   restart_services
 }
 
-# 重置配置
 reset_config() {
   echo -e "${YELLOW}警告: 此操作将重置所有配置，包括已添加的解锁服务。${PLAIN}"
   read -p "确定要继续吗? (y/n): " confirm
@@ -543,7 +464,6 @@ reset_config() {
   restart_services
 }
 
-# 卸载服务
 uninstall_service() {
   echo -e "${YELLOW}警告: 此操作将卸载解锁服务，所有配置将被删除。${PLAIN}"
   read -p "确定要继续吗? (y/n): " confirm
@@ -572,7 +492,6 @@ uninstall_service() {
   echo -e "${GREEN}解锁服务已卸载!${PLAIN}"
 }
 
-# 安装解锁服务
 install_service() {
   check_root
   check_system
@@ -586,48 +505,34 @@ install_service() {
   init_firewall_whitelist
   apply_firewall_rules
   start_services
-  
-  # 检查服务是否成功启动，如失败则尝试修复
   if ! systemctl is-active sniproxy &> /dev/null; then
     echo -e "${YELLOW}SNIProxy启动失败，尝试修复...${PLAIN}"
     fix_sniproxy
   fi
-  
   echo -e "${GREEN}解锁服务安装完成!${PLAIN}"
   check_status
 }
 
-# 修复服务
 repair_service() {
   echo -e "${BLUE}开始修复服务...${PLAIN}"
-  
-  # 修复dnsmasq
   echo -e "${YELLOW}修复dnsmasq...${PLAIN}"
   systemctl stop dnsmasq
   config_dnsmasq
   systemctl restart dnsmasq
   systemctl enable dnsmasq
-  
-  # 修复SNIProxy
   echo -e "${YELLOW}修复SNIProxy...${PLAIN}"
   fix_sniproxy
-  
-  # 重新应用服务配置
   apply_service_config
-  
-  # 重新应用防火墙规则
   apply_firewall_rules
-  
   echo -e "${GREEN}服务修复完成!${PLAIN}"
   check_status
 }
 
-# 显示菜单
 show_menu() {
   clear
   echo -e "流媒体解锁脚本 - 基于DNS+SNIProxy"
-  echo -e "支持Netflix、Disney+、TikTok、OpenAI、Claude、Gemini等服务解锁"
-  echo -e "版本: 2.2 (增强版)"
+  echo -e "支持Netflix、Disney+、TikTok、YouTube、OpenAI、Claude、Gemini、xAI等服务解锁"
+  echo -e "版本: 2.3 (增强版)"
   echo -e "----------------------------------------"
   echo -e "1. 安装解锁服务"
   echo -e "2. 添加自定义服务"
@@ -643,7 +548,6 @@ show_menu() {
   echo -e "0. 退出"
   echo -e "----------------------------------------"
   read -p "请输入选项 [0-11]: " option
-  
   case $option in
     1) install_service ;;
     2) add_custom_service ;;
@@ -659,12 +563,10 @@ show_menu() {
     0) exit 0 ;;
     *) echo -e "${RED}无效选项!${PLAIN}" ;;
   esac
-  
   read -p "按任意键继续..." key
   show_menu
 }
 
-# 程序入口
 main() {
   check_root
   show_menu
