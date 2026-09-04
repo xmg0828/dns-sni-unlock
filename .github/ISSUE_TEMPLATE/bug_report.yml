@@ -1,0 +1,48 @@
+name: Bug report
+description: Report a reproducible defect
+title: "[Bug]: "
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: Security vulnerabilities must be reported privately through the Security tab.
+  - type: input
+    id: os
+    attributes:
+      label: Operating system
+      description: Distribution and version
+      placeholder: Debian 12
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: dns-sni-unlock version
+      placeholder: 3.0.0
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Reproduction steps
+      description: Include the exact command and sanitized configuration.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior and logs
+      description: Remove IPs, credentials, and other sensitive data.
+    validations:
+      required: true
+  - type: textarea
+    id: doctor
+    attributes:
+      label: Doctor output
+      render: shell

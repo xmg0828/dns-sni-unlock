@@ -1,0 +1,81 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    name: ShellCheck
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - name: Install ShellCheck
+        run: sudo apt-get update && sudo apt-get install -y shellcheck
+      - name: Check syntax
+        run: bash -n dns-sni-unlock.sh tests/test.sh
+      - name: Run ShellCheck
+        run: shellcheck -x dns-sni-unlock.sh tests/test.sh
+
+  linux:
+    name: Behavior tests (${{ matrix.name }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Debian 11
+            image: debian:11-slim
+          - name: Debian 12
+            image: debian:12-slim
+          - name: Debian 13
+            image: debian:13-slim
+          - name: Ubuntu 20.04
+            image: ubuntu:20.04
+          - name: Ubuntu 22.04
+            image: ubuntu:22.04
+          - name: Ubuntu 24.04
+            image: ubuntu:24.04
+    container:
+      image: ${{ matrix.image }}
+    steps:
+      - name: Install test dependencies
+        env:
+          DEBIAN_FRONTEND: noninteractive
+        run: apt-get update && apt-get install -y --no-install-recommends bash ca-certificates coreutils diffutils gawk git grep sed python3
+      - name: Verify Python dependency
+        run: python3 -c 'import ipaddress'
+      - name: Check out repository
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - name: Check syntax
+        run: bash -n dns-sni-unlock.sh tests/test.sh
+      - name: Run isolated behavior tests
+        run: bash ./tests/test.sh
+
+  macos:
+    name: Behavior tests (macOS system Bash 3.2 with Homebrew Python)
+    runs-on: macos-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - name: Install Homebrew Python
+        run: brew install python
+      - name: Put Homebrew Python first on PATH
+        run: echo "$(brew --prefix python)/bin" >> "$GITHUB_PATH"
+      - name: Verify Python dependency
+        run: PATH="$(brew --prefix python)/bin:$PATH" python3 -c 'import ipaddress'
+      - name: Verify system Bash 3.2
+        run: /bin/bash -c '[[ $BASH_VERSION == 3.2.* ]]'
+      - name: Check syntax with system Bash
+        run: /bin/bash -n dns-sni-unlock.sh tests/test.sh
+      - name: Run isolated behavior tests with system Bash
+        run: PATH="$(brew --prefix python)/bin:$PATH" /bin/bash ./tests/test.sh
