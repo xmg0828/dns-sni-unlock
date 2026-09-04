@@ -753,7 +753,7 @@ render_configs() (
   fi
   dnsmasq_candidate="$tmpdir/dnsmasq.new"
   sniproxy_candidate="$tmpdir/sniproxy.new"
-  # shellcheck disable=SC2329 # invoked indirectly by the EXIT trap
+  # shellcheck disable=SC2317,SC2329 # invoked indirectly by the EXIT trap
   render_rollback() {
     local result=$?
     trap - EXIT
@@ -878,7 +878,7 @@ firewall_apply() (
   firewall_allow="$firewall_txdir/allow"
   firewall_snapshot="$firewall_txdir/firewall.before"
   firewall_ownership_before="$firewall_txdir/ownership.before"
-  # shellcheck disable=SC2329 # invoked indirectly by the EXIT trap
+  # shellcheck disable=SC2317,SC2329 # invoked indirectly by the EXIT trap
   firewall_rollback() {
     local result=$?
     trap - EXIT
@@ -1484,7 +1484,7 @@ install_gateway() (
   install_snapshots_complete=0
   [[ -e "$CONFIG_DIR" ]] && install_config_existed=1
   [[ -e "$STATE_DIR" ]] && install_state_existed=1
-  # shellcheck disable=SC2329 # invoked indirectly by the EXIT trap
+  # shellcheck disable=SC2317,SC2329 # invoked indirectly by the EXIT trap
   install_rollback() {
     local result=$? install_reload_failed=0
     trap - EXIT
@@ -1652,7 +1652,7 @@ apply_all() (
   if ! apply_tmpdir=$(mktemp -d); then
     return 1
   fi
-  # shellcheck disable=SC2329 # invoked indirectly by the EXIT trap
+  # shellcheck disable=SC2317,SC2329 # invoked indirectly by the EXIT trap
   apply_setup_cleanup() {
     local result=$?
     trap - EXIT
@@ -1689,7 +1689,7 @@ apply_all() (
   if ! save_firewall_snapshot "$apply_tmpdir/firewall.before"; then
     return 1
   fi
-  # shellcheck disable=SC2329 # invoked indirectly by the EXIT trap
+  # shellcheck disable=SC2317,SC2329 # invoked indirectly by the EXIT trap
   rollback_apply() {
     local result=$? retain_evidence=0
     trap - EXIT
